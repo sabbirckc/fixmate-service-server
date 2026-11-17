@@ -6,6 +6,8 @@ import authRoutes from './routes/auth.js'
 import serviceRoutes from './routes/services.js'
 import bookingRoutes from './routes/bookings.js'
 import paymentRoutes from './routes/payments.js'
+import adminRoutes from './routes/admin.js'
+import userRoutes from './routes/users.js'
 
 dotenv.config()
 
@@ -27,6 +29,8 @@ app.use('/api/auth', authRoutes)
 app.use('/api/services', serviceRoutes)
 app.use('/api/bookings', bookingRoutes)
 app.use('/api/payments', paymentRoutes)
+app.use('/api/admin', adminRoutes)
+app.use('/api/users', userRoutes)
 
 // Root & Health check
 app.get('/', (req, res) => {
