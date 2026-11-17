@@ -8,6 +8,7 @@ import bookingRoutes from './routes/bookings.js'
 import paymentRoutes from './routes/payments.js'
 import adminRoutes from './routes/admin.js'
 import userRoutes from './routes/users.js'
+import { notFoundHandler, globalErrorHandler } from './middlewares/errorHandler.js'
 
 dotenv.config()
 
@@ -31,6 +32,10 @@ app.use('/api/bookings', bookingRoutes)
 app.use('/api/payments', paymentRoutes)
 app.use('/api/admin', adminRoutes)
 app.use('/api/users', userRoutes)
+
+// 404 & Global Error Middlewares
+app.use(notFoundHandler)
+app.use(globalErrorHandler)
 
 // Root & Health check
 app.get('/', (req, res) => {
