@@ -26,6 +26,20 @@ app.use(cors({
 }))
 app.use(express.json())
 
+// Root & Health check endpoints
+app.get('/', (req, res) => {
+  res.json({
+    success: true,
+    message: 'FixMate Service Express API Server is running',
+    version: '1.0.0',
+    documentation: {
+      health: '/api/health',
+      services: '/api/services',
+      auth: '/api/auth'
+    }
+  })
+})
+
 // Routes
 app.use('/api/health', healthRoutes)
 app.use('/api/auth', authRoutes)
@@ -35,26 +49,9 @@ app.use('/api/payments', paymentRoutes)
 app.use('/api/admin', adminRoutes)
 app.use('/api/users', userRoutes)
 
-// 404 & Global Error Middlewares
+// 404 & Global Error Middlewares (Must be last)
 app.use(notFoundHandler)
 app.use(globalErrorHandler)
-
-// Root & Health check
-app.get('/', (req, res) => {
-  res.json({
-    status: 'ok',
-    service: 'FixMate Service API',
-    version: '1.0.0'
-  })
-})
-
-app.get('/api/health', (req, res) => {
-  res.json({
-    status: 'ok',
-    message: 'FixMate Express Server is running and connected',
-    timestamp: new Date().toISOString()
-  })
-})
 
 // Initialize database and start server
 async function startServer() {
