@@ -1,31 +1,53 @@
 import express from 'express'
 import cors from 'cors'
 import dotenv from 'dotenv'
-import {MongoClient} from 'mongodb'
+import { connectDB } from './config/db.js'
+
 dotenv.config()
 
 const app = express()
+const port = process.env.PORT || 5000
+const clientUrl = process.env.CLIENT_URL || 'http://localhost:3000'
 
-app.use(cors());
+// Middleware
+app.use(cors({
+  origin: [clientUrl, 'http://localhost:3000', 'https://fixmate-service.vercel.app'],
+  credentials: true,
+  methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
+  allowedHeaders: ['Content-Type', 'Authorization']
+}))
 app.use(express.json())
 
-const client = new MongoClient(process.env.MONGODB_URI);
-export async function connectToMongoDB() {
+// Root & Health check
+app.get('/', (req, res) => {
+  res.json({
+    status: 'ok',
+    service: 'FixMate Service API',
+    version: '1.0.0'
+  })
+})
+
+app.get('/api/health', (req, res) => {
+  res.json({
+    status: 'ok',
+    message: 'FixMate Express Server is running and connected',
+    timestamp: new Date().toISOString()
+  })
+})
+
+// Initialize database and start server
+async function startServer() {
   try {
-    await client.connect();
-    console.log("You successfully connected to MongoDB!");
-    return client;
-  } catch (err) {
-    console.dir(err);
+    await connectDB()
+    app.listen(port, () => {
+      console.log(`FixMate Server is running on port ${port}`)
+    })
+  } catch (error) {
+    console.error("Error starting server:", error)
+    process.exit(1)
   }
 }
-const connectedClient= await connectToMongoDB()
-const db = connectedClient.db('fixmate-service')
 
-app.get('/', (req, res) => {
-    res.send('Hello World')
-})
+startServer()
 
-app.listen(process.env.PORT || 3000, () => {
-console.log(`Server is running on port ${process.env.PORT || 3000}`)
-})
+export default app
