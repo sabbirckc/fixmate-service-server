@@ -5,6 +5,7 @@ import { connectDB } from './config/db.js'
 import authRoutes from './routes/auth.js'
 import serviceRoutes from './routes/services.js'
 import bookingRoutes from './routes/bookings.js'
+import paymentRoutes from './routes/payments.js'
 
 dotenv.config()
 
@@ -25,6 +26,7 @@ app.use(express.json())
 app.use('/api/auth', authRoutes)
 app.use('/api/services', serviceRoutes)
 app.use('/api/bookings', bookingRoutes)
+app.use('/api/payments', paymentRoutes)
 
 // Root & Health check
 app.get('/', (req, res) => {
