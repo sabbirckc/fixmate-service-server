@@ -69,4 +69,51 @@ router.get('/profile', verifyToken, async (req, res) => {
   }
 })
 
+/**
+ * POST /api/users/upgrade-pro
+ * Optional Feature: Upgrade technician to Pro Plan (Unlimited services + Verified Pro badge)
+ */
+router.post('/upgrade-pro', verifyToken, async (req, res) => {
+  try {
+    const userEmail = req.user.email
+    const { users, payments } = getCollections()
+
+    const user = await users.findOne({ email: userEmail })
+    if (!user) {
+      return res.status(404).json({ success: false, message: 'User not found' })
+    }
+
+    const now = new Date()
+    await users.updateOne(
+      { email: userEmail },
+      { $set: { plan: 'pro', upgradedAt: now } }
+    )
+
+    // Record subscription in payments
+    const subscriptionRecord = {
+      serviceTitle: 'FixMate Verified Pro Technician Subscription',
+      customerName: user.name,
+      customerEmail: user.email,
+      technicianName: user.name,
+      technicianEmail: user.email,
+      amount: 29.00,
+      currency: 'usd',
+      transactionId: `sub_${Date.now()}`,
+      stripeSessionId: `sub_session_${Date.now()}`,
+      paymentStatus: 'paid',
+      type: 'subscription',
+      paidAt: now
+    }
+    await payments.insertOne(subscriptionRecord)
+
+    return res.json({
+      success: true,
+      message: 'Congratulations! You are now upgraded to FixMate Verified Pro with unlimited listings.',
+      plan: 'pro'
+    })
+  } catch (error) {
+    return res.status(500).json({ success: false, message: 'Failed to upgrade to Pro', error: error.message })
+  }
+})
+
 export default router

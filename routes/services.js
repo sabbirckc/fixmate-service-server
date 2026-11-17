@@ -149,7 +149,9 @@ router.get('/:id', async (req, res) => {
           image: technician.image || null,
           area: technician.area || service.serviceArea,
           bio: technician.bio || 'Professional FixMate Certified Technician',
-          phone: technician.phone || null
+          phone: technician.phone || null,
+          plan: technician.plan || 'free',
+          isPro: technician.plan === 'pro'
         }
       }
     }
@@ -193,7 +195,22 @@ router.post('/', verifyToken, verifyTechnician, async (req, res) => {
       return res.status(400).json({ success: false, message: 'Base price must be a positive number' })
     }
 
-    const { services } = getCollections()
+    const { services, users } = getCollections()
+
+    // Optional Feature 1: Free vs Pro Plan service count enforcement
+    const technicianDoc = await users.findOne({ email: req.user.email })
+    const isPro = technicianDoc?.plan === 'pro'
+    if (!isPro) {
+      const currentServiceCount = await services.countDocuments({ technicianEmail: req.user.email })
+      if (currentServiceCount >= 3) {
+        return res.status(403).json({
+          success: false,
+          isLimitReached: true,
+          message: 'Free technician plan is limited to 3 services. Upgrade to Pro for unlimited service listings and a Verified Pro badge!'
+        })
+      }
+    }
+
     const newService = {
       title: title.trim(),
       category: category.trim(),

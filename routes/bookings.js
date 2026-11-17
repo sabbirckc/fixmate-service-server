@@ -313,4 +313,81 @@ router.patch('/:id/status', verifyToken, verifyTechnician, async (req, res) => {
   }
 })
 
+/**
+ * POST /api/bookings/:id/review
+ * Optional Feature: Customer leaves a 1-5 star rating & review for a paid booking
+ */
+router.post('/:id/review', verifyToken, verifyCustomer, async (req, res) => {
+  try {
+    const { id } = req.params
+    const { rating, review } = req.body
+
+    if (!ObjectId.isValid(id)) {
+      return res.status(400).json({ success: false, message: 'Invalid booking ID' })
+    }
+
+    const numericRating = parseInt(rating, 10)
+    if (isNaN(numericRating) || numericRating < 1 || numericRating > 5) {
+      return res.status(400).json({ success: false, message: 'Rating must be an integer between 1 and 5' })
+    }
+
+    const { bookings, services } = getCollections()
+    const booking = await bookings.findOne({ _id: new ObjectId(id) })
+
+    if (!booking) {
+      return res.status(404).json({ success: false, message: 'Booking not found' })
+    }
+
+    if (booking.customerEmail !== req.user.email) {
+      return res.status(403).json({ success: false, message: 'Forbidden: You can only review your own bookings' })
+    }
+
+    if (booking.paymentStatus !== 'paid') {
+      return res.status(400).json({ success: false, message: 'Reviews can only be submitted for paid bookings' })
+    }
+
+    const now = new Date()
+    await bookings.updateOne(
+      { _id: new ObjectId(id) },
+      {
+        $set: {
+          rating: numericRating,
+          review: review ? review.trim() : '',
+          reviewedAt: now,
+          updatedAt: now
+        }
+      }
+    )
+
+    // Recalculate average rating for the service
+    if (booking.serviceId && ObjectId.isValid(booking.serviceId)) {
+      const allReviewsForService = await bookings
+        .find({ serviceId: booking.serviceId, rating: { $exists: true } })
+        .toArray()
+
+      const count = allReviewsForService.length
+      const avg = count > 0 ? allReviewsForService.reduce((acc, b) => acc + b.rating, 0) / count : numericRating
+
+      await services.updateOne(
+        { _id: new ObjectId(booking.serviceId) },
+        {
+          $set: {
+            ratingAvg: Math.round(avg * 10) / 10,
+            reviewCount: count
+          }
+        }
+      )
+    }
+
+    return res.json({
+      success: true,
+      message: 'Review and rating submitted successfully',
+      rating: numericRating,
+      review
+    })
+  } catch (error) {
+    return res.status(500).json({ success: false, message: 'Failed to submit review', error: error.message })
+  }
+})
+
 export default router
