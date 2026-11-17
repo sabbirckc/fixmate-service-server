@@ -1,16 +1,13 @@
 import { Router } from 'express'
 import { ObjectId } from 'mongodb'
-import Stripe from 'stripe'
 import dotenv from 'dotenv'
 import { getCollections } from '../config/db.js'
 import { verifyToken, verifyCustomer } from '../middlewares/auth.js'
+import { stripe, isStripeMock } from '../config/stripe.js'
 
 dotenv.config()
 
 const router = Router()
-const stripeKey = process.env.STRIPE_SECRET_KEY || 'sk_test_mock_fixmate_key'
-const stripe = new Stripe(stripeKey, { apiVersion: '2024-06-20' })
-
 const clientUrl = process.env.CLIENT_URL || 'http://localhost:3000'
 
 /**
@@ -57,7 +54,7 @@ router.post('/create-checkout-session', verifyToken, verifyCustomer, async (req,
     const unitAmountCents = Math.round(amount * 100)
 
     // Check if real Stripe key is provided
-    const isMock = !process.env.STRIPE_SECRET_KEY || process.env.STRIPE_SECRET_KEY.startsWith('sk_test_mock')
+    const isMock = isStripeMock
 
     if (isMock) {
       // Test simulation session for seamless testing without crashing
