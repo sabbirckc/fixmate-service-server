@@ -8,6 +8,7 @@ import bookingRoutes from './routes/bookings.js'
 import paymentRoutes from './routes/payments.js'
 import adminRoutes from './routes/admin.js'
 import userRoutes from './routes/users.js'
+import healthRoutes from './routes/health.js'
 import { notFoundHandler, globalErrorHandler } from './middlewares/errorHandler.js'
 
 dotenv.config()
@@ -26,6 +27,7 @@ app.use(cors({
 app.use(express.json())
 
 // Routes
+app.use('/api/health', healthRoutes)
 app.use('/api/auth', authRoutes)
 app.use('/api/services', serviceRoutes)
 app.use('/api/bookings', bookingRoutes)
