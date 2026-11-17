@@ -2,6 +2,7 @@ import express from 'express'
 import cors from 'cors'
 import dotenv from 'dotenv'
 import { connectDB } from './config/db.js'
+import authRoutes from './routes/auth.js'
 
 dotenv.config()
 
@@ -17,6 +18,9 @@ app.use(cors({
   allowedHeaders: ['Content-Type', 'Authorization']
 }))
 app.use(express.json())
+
+// Routes
+app.use('/api/auth', authRoutes)
 
 // Root & Health check
 app.get('/', (req, res) => {
