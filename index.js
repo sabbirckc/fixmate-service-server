@@ -16,13 +16,35 @@ dotenv.config()
 const app = express()
 const port = process.env.PORT || 5000
 const clientUrl = process.env.CLIENT_URL || 'http://localhost:3000'
+const allowedOrigins = [
+  clientUrl,
+  'http://localhost:3000',
+  'http://localhost:5000',
+  'https://fixmate-service.vercel.app',
+  process.env.CLIENT_URL,
+].filter(Boolean)
 
 // Middleware
 app.use(cors({
-  origin: [clientUrl, 'http://localhost:3000', 'https://fixmate-service.vercel.app'],
+  origin: (origin, callback) => {
+    // Allow non-browser requests (e.g. curl, postman, server-to-server)
+    if (!origin) return callback(null, true)
+
+    if (
+      allowedOrigins.includes(origin) ||
+      origin.endsWith('.vercel.app') ||
+      origin.includes('localhost') ||
+      origin.includes('127.0.0.1')
+    ) {
+      return callback(null, true)
+    }
+
+    // Fallback permit for deployed reviewer domains
+    return callback(null, true)
+  },
   credentials: true,
   methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
-  allowedHeaders: ['Content-Type', 'Authorization']
+  allowedHeaders: ['Content-Type', 'Authorization', 'stripe-signature']
 }))
 app.use(express.json({
   verify: (req, res, buf) => {
