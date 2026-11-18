@@ -5,6 +5,56 @@ import { verifyToken, verifyTechnician } from '../middlewares/auth.js'
 
 const router = Router()
 
+// Escape regex characters safely
+const escapeRegex = (text) => String(text).replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+
+// Comprehensive synonyms & relatable category mapping
+const SYNONYMS = {
+  mobile: ['Smartphone', 'phone'],
+  cell: ['Smartphone', 'phone'],
+  cellphone: ['Smartphone', 'phone'],
+  phone: ['Smartphone', 'iPhone', 'Galaxy'],
+  android: ['Smartphone', 'Samsung'],
+  iphone: ['Smartphone', 'Apple', 'OLED'],
+  fridge: ['Refrigerator', 'freezer'],
+  freeze: ['Refrigerator', 'freezer'],
+  freezer: ['Refrigerator'],
+  cooling: ['Refrigerator', 'AC'],
+  cool: ['AC', 'Refrigerator'],
+  aircon: ['AC'],
+  cooler: ['AC'],
+  computer: ['Laptop & PC', 'desktop'],
+  pc: ['Laptop & PC', 'desktop'],
+  laptop: ['Laptop & PC', 'MacBook'],
+  desktop: ['Laptop & PC'],
+  mac: ['MacBook', 'Laptop & PC'],
+  macbook: ['Laptop & PC'],
+  television: ['TV', 'screen', 'LED'],
+  tv: ['TV', 'screen', 'LED'],
+  screen: ['OLED', 'display', 'TV'],
+  display: ['OLED', 'screen'],
+  wire: ['Electrical', 'rewiring', 'circuit'],
+  wiring: ['Electrical', 'circuit'],
+  electric: ['Electrical'],
+  electrical: ['Electrical'],
+  switch: ['Electrical', 'Board'],
+  meter: ['Electrical', 'Sub-Meter'],
+  washer: ['Washing Machine'],
+  washing: ['Washing Machine'],
+  laundry: ['Washing Machine'],
+}
+
+function getRelatableTerms(cleanSearch) {
+  const terms = new Set()
+  const lower = cleanSearch.toLowerCase()
+  for (const [key, relatedList] of Object.entries(SYNONYMS)) {
+    if (lower.includes(key)) {
+      relatedList.forEach(r => terms.add(r))
+    }
+  }
+  return Array.from(terms)
+}
+
 /**
  * GET /api/services/featured
  * Get 6 latest approved and available services for Home page
@@ -46,14 +96,48 @@ router.get('/', async (req, res) => {
       isAvailable: true
     }
 
-    // Search query (matches title or description or category)
-    if (search && search.trim()) {
-      const searchRegex = new RegExp(search.trim(), 'i')
-      query.$or = [
-        { title: { $regex: searchRegex } },
-        { category: { $regex: searchRegex } },
-        { description: { $regex: searchRegex } }
-      ]
+    // Escape regex characters safely
+    const escapeRegex = (text) => String(text).replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+
+    // Search query (matches title, category, description, technicianName, serviceMode, area)
+    if (search && String(search).trim()) {
+      const cleanSearch = String(search).trim()
+      const escapedFull = escapeRegex(cleanSearch)
+      
+      // Tokenize into clean words
+      const words = cleanSearch
+        .split(/\s+/)
+        .map(w => w.replace(/^[^\w]+|[^\w]+$/g, ''))
+        .filter(w => w.length > 0)
+        .map(w => {
+          const esc = escapeRegex(w)
+          // Word boundary for short words (<= 3 chars, e.g. 'ac', 'tv', 'pc') so 'ac' doesn't match 'macbook'
+          return w.length <= 3 ? `\\b${esc}\\b` : esc
+        })
+
+      const searchableFields = ['title', 'category', 'description', 'technicianName', 'serviceMode', 'area']
+
+      if (words.length <= 1) {
+        query.$or = searchableFields.map(f => ({
+          [f]: { $regex: new RegExp(escapedFull, 'i') }
+        }))
+      } else {
+        // Multi-word search: Match exact phrase OR all individual keywords ($and)
+        const phraseOr = searchableFields.map(f => ({
+          [f]: { $regex: new RegExp(escapedFull, 'i') }
+        }))
+
+        const allWordsAnd = words.map(wordPattern => ({
+          $or: searchableFields.map(f => ({
+            [f]: { $regex: new RegExp(wordPattern, 'i') }
+          }))
+        }))
+
+        query.$or = [
+          ...phraseOr,
+          { $and: allWordsAnd }
+        ]
+      }
     }
 
     // Category filter
@@ -80,14 +164,65 @@ router.get('/', async (req, res) => {
     const pageSize = Math.max(1, parseInt(limit, 10) || 9)
     const skip = (pageNumber - 1) * pageSize
 
-    const [serviceList, totalCount] = await Promise.all([
+    let [serviceList, totalCount] = await Promise.all([
       services.find(query).sort(sortQuery).skip(skip).limit(pageSize).toArray(),
       services.countDocuments(query)
     ])
 
+    let isRelatable = false
+
+    // Relatable Fallback: If no direct matches and a search term was entered, find relatable services
+    if (totalCount === 0 && search && String(search).trim()) {
+      const cleanSearch = String(search).trim()
+      const relatableKeywords = getRelatableTerms(cleanSearch)
+      const relatableConditions = []
+
+      // 1. Relatable synonyms and category keywords
+      relatableKeywords.forEach(term => {
+        const esc = escapeRegex(term)
+        searchableFields.forEach(f => {
+          relatableConditions.push({ [f]: { $regex: new RegExp(esc, 'i') } })
+        })
+      })
+
+      // 2. Relatable individual words
+      const words = cleanSearch
+        .split(/\s+/)
+        .map(w => w.replace(/^[^\w]+|[^\w]+$/g, ''))
+        .filter(w => w.length > 1)
+
+      words.forEach(word => {
+        const esc = escapeRegex(word)
+        const pattern = word.length <= 3 ? `\\b${esc}\\b` : esc
+        searchableFields.forEach(f => {
+          relatableConditions.push({ [f]: { $regex: new RegExp(pattern, 'i') } })
+        })
+      })
+
+      if (relatableConditions.length > 0) {
+        const relatableQuery = {
+          approvalStatus: 'approved',
+          isAvailable: true,
+          $or: relatableConditions
+        }
+
+        const [relatableList, relatableCount] = await Promise.all([
+          services.find(relatableQuery).sort(sortQuery).skip(skip).limit(pageSize).toArray(),
+          services.countDocuments(relatableQuery)
+        ])
+
+        if (relatableCount > 0) {
+          serviceList = relatableList
+          totalCount = relatableCount
+          isRelatable = true
+        }
+      }
+    }
+
     return res.json({
       success: true,
       services: serviceList,
+      isRelatable,
       pagination: {
         total: totalCount,
         page: pageNumber,

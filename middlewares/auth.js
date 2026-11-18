@@ -1,7 +1,8 @@
 import jwt from 'jsonwebtoken'
 import { createRemoteJWKSet, jwtVerify } from 'jose'
 import dotenv from 'dotenv'
-import { getCollections } from '../config/db.js'
+import { ObjectId } from 'mongodb'
+import { getCollections, getDb } from '../config/db.js'
 
 dotenv.config()
 
@@ -61,7 +62,35 @@ export async function verifyToken(req, res, next) {
     }
 
     // 3. Extract user information from token payload
-    const userEmail = decoded.email || decoded.sub
+    const db = getDb()
+    const { users } = getCollections()
+    const authUserCol = db.collection('user')
+
+    let userEmail = decoded.email
+    const tokenSub = decoded.sub || decoded.id
+
+    // If decoded.email is missing or not a valid email address (e.g. decoded.sub is an ObjectId)
+    if (!userEmail || !userEmail.includes('@')) {
+      if (tokenSub) {
+        if (tokenSub.includes('@')) {
+          userEmail = tokenSub
+        } else {
+          // Look up user in Better Auth 'user' collection
+          const authUser = await authUserCol.findOne({
+            $or: [
+              { _id: tokenSub },
+              { id: tokenSub },
+              ...(ObjectId.isValid(tokenSub) ? [{ _id: new ObjectId(tokenSub) }] : [])
+            ]
+          }).catch(() => null)
+
+          if (authUser && authUser.email) {
+            userEmail = authUser.email
+          }
+        }
+      }
+    }
+
     if (!userEmail) {
       return res.status(401).json({
         success: false,
@@ -69,12 +98,46 @@ export async function verifyToken(req, res, next) {
       })
     }
 
-    const userRole = decoded.role || 'customer'
-    const userName = decoded.name || ''
+    // Look up user details in BetterAuth collection to ensure latest info
+    const authUser = await authUserCol.findOne({
+      $or: [
+        { email: userEmail },
+        ...(tokenSub ? [{ _id: tokenSub }, { id: tokenSub }] : []),
+        ...(tokenSub && ObjectId.isValid(tokenSub) ? [{ _id: new ObjectId(tokenSub) }] : [])
+      ]
+    }).catch(() => null)
+
+    const userRole = decoded.role || authUser?.role || 'customer'
+    const userName = decoded.name || authUser?.name || ''
+    const userPhone = decoded.phone || authUser?.phone || ''
+    const userArea = decoded.area || authUser?.area || ''
+    const userBio = decoded.bio || authUser?.bio || ''
+    const userImage = decoded.image || authUser?.image || null
 
     // 4. Sync / Create user in database (MongoDB users collection)
-    const { users } = getCollections()
     let user = await users.findOne({ email: userEmail })
+
+    // Clean up or migrate any stray record where email was erroneously saved as the tokenSub ID
+    if (tokenSub && tokenSub !== userEmail) {
+      const strayUser = await users.findOne({ email: tokenSub })
+      if (strayUser) {
+        if (!user) {
+          await users.updateOne(
+            { _id: strayUser._id },
+            {
+              $set: {
+                email: userEmail,
+                name: userName || strayUser.name || 'FixMate User',
+                updatedAt: new Date()
+              }
+            }
+          )
+          user = await users.findOne({ email: userEmail })
+        } else {
+          await users.deleteOne({ _id: strayUser._id }).catch(() => {})
+        }
+      }
+    }
 
     if (!user) {
       const now = new Date()
@@ -82,14 +145,28 @@ export async function verifyToken(req, res, next) {
         name: userName || 'FixMate User',
         email: userEmail,
         role: userRole,
-        phone: decoded.phone || '',
-        area: decoded.area || '',
-        bio: decoded.bio || '',
+        phone: userPhone,
+        area: userArea,
+        bio: userBio,
+        image: userImage,
         createdAt: now,
         updatedAt: now
       }
       const insertResult = await users.insertOne(newUser)
       user = { ...newUser, _id: insertResult.insertedId }
+    } else {
+      // Sync empty fields if we found them in authUser or token
+      const syncDoc = {}
+      if ((!user.name || user.name === 'FixMate User') && userName) syncDoc.name = userName
+      if (!user.phone && userPhone) syncDoc.phone = userPhone
+      if (!user.area && userArea) syncDoc.area = userArea
+      if (!user.bio && userBio) syncDoc.bio = userBio
+      if (!user.image && userImage) syncDoc.image = userImage
+      if (Object.keys(syncDoc).length > 0) {
+        syncDoc.updatedAt = new Date()
+        await users.updateOne({ _id: user._id }, { $set: syncDoc })
+        user = { ...user, ...syncDoc }
+      }
     }
 
     // 5. Attach req.user for downstream handlers and role middlewares
@@ -102,6 +179,7 @@ export async function verifyToken(req, res, next) {
       phone: user.phone || '',
       area: user.area || '',
       bio: user.bio || '',
+      image: user.image || null,
       plan: user.plan || 'free'
     }
 
