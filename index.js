@@ -51,6 +51,16 @@ app.use(express.json({
   }
 }))
 
+// Ensure MongoDB is connected for every request (essential for Vercel serverless cold starts)
+app.use(async (req, res, next) => {
+  try {
+    await connectDB()
+    next()
+  } catch (error) {
+    res.status(500).json({ success: false, message: 'Database connection failed', error: error.message })
+  }
+})
+
 // Root & Health check endpoints
 app.get('/', (req, res) => {
   res.json({
@@ -78,7 +88,7 @@ app.use('/api/users', userRoutes)
 app.use(notFoundHandler)
 app.use(globalErrorHandler)
 
-// Initialize database and start server
+// Initialize database and start server for non-serverless environments
 async function startServer() {
   try {
     await connectDB()
@@ -91,6 +101,8 @@ async function startServer() {
   }
 }
 
-startServer()
+if (!process.env.VERCEL) {
+  startServer()
+}
 
 export default app
