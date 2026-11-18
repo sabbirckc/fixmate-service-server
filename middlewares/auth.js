@@ -6,7 +6,7 @@ import { getCollections, getDb } from '../config/db.js'
 
 dotenv.config()
 
-const clientUrl = process.env.CLIENT_URL || 'http://localhost:3000'
+const clientUrl = process.env.CLIENT_URL
 const JWT_SECRET = process.env.JWT_SECRET || process.env.BETTER_AUTH_SECRET || 'fixmate_super_secret_jwt_key_2026_secured'
 
 // Initialize BetterAuth JWKS remote key set

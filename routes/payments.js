@@ -8,7 +8,7 @@ import { stripe, isStripeMock } from '../config/stripe.js'
 dotenv.config()
 
 const router = Router()
-const clientUrl = process.env.CLIENT_URL || 'http://localhost:3000'
+const clientUrl = process.env.CLIENT_URL
 
 /**
  * POST /api/payments/create-checkout-session

@@ -15,10 +15,9 @@ dotenv.config()
 
 const app = express()
 const port = process.env.PORT || 5000
-const clientUrl = process.env.CLIENT_URL || 'http://localhost:3000'
+const clientUrl = process.env.CLIENT_URL
 const allowedOrigins = [
   clientUrl,
-  'http://localhost:3000',
   'http://localhost:5000',
   'https://fixmate-service.vercel.app',
   process.env.CLIENT_URL,
