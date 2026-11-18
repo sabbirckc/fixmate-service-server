@@ -201,7 +201,7 @@ router.get('/bookings', async (req, res) => {
 
     const query = {}
     if (status && status !== 'all') {
-      query.status = status
+      query.status = status === "cancelled" ? { $in: ["cancelled", "rejected"] } : status
     }
 
     const allBookings = await bookings
