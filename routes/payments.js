@@ -110,12 +110,13 @@ router.post('/create-checkout-session', verifyToken, verifyCustomer, async (req,
 })
 
 /**
- * GET /api/payments/verify
- * Verifies payment session and records payment document (Idempotent)
+ * Handler for Payment Session Verification & MongoDB Update
+ * Handles both POST and GET from client success page
  */
-router.get('/verify', verifyToken, verifyCustomer, async (req, res) => {
+async function handlePaymentVerification(req, res) {
   try {
-    const { session_id, booking_id } = req.query
+    const session_id = req.body?.session_id || req.query?.session_id
+    const booking_id = req.body?.booking_id || req.query?.booking_id
 
     if (!session_id) {
       return res.status(400).json({ success: false, message: 'Session ID is required' })
@@ -150,7 +151,7 @@ router.get('/verify', verifyToken, verifyCustomer, async (req, res) => {
       if (session.payment_status !== 'paid') {
         return res.status(400).json({ success: false, message: 'Payment has not been completed on Stripe' })
       }
-      bookingTargetId = session.metadata?.bookingId
+      bookingTargetId = session.metadata?.bookingId || booking_id
       transactionId = session.payment_intent ? String(session.payment_intent) : `txn_${session.id}`
       paidAmount = (session.amount_total || 0) / 100
     }
@@ -180,10 +181,10 @@ router.get('/verify', verifyToken, verifyCustomer, async (req, res) => {
       paidAt: now
     }
 
-    // Insert payment record
+    // Insert payment record into MongoDB payments collection
     const paymentResult = await payments.insertOne(paymentDoc)
 
-    // Update booking status
+    // Update booking status in MongoDB bookings collection to 'paid'
     await bookings.updateOne(
       { _id: booking._id },
       {
@@ -213,7 +214,15 @@ router.get('/verify', verifyToken, verifyCustomer, async (req, res) => {
       error: error.message
     })
   }
-})
+}
+
+/**
+ * POST & GET /api/payments/verify
+ * Verifies payment session and updates MongoDB (Idempotent)
+ */
+router.post('/verify', verifyToken, verifyCustomer, handlePaymentVerification)
+router.get('/verify', verifyToken, verifyCustomer, handlePaymentVerification)
+router.post('/confirm', verifyToken, verifyCustomer, handlePaymentVerification)
 
 /**
  * GET /api/payments/my
