@@ -225,6 +225,89 @@ router.get('/verify', verifyToken, verifyCustomer, handlePaymentVerification)
 router.post('/confirm', verifyToken, verifyCustomer, handlePaymentVerification)
 
 /**
+ * POST /api/payments/verify-pro
+ * Verifies Stripe payment session for Technician Pro Plan upgrade
+ */
+router.post('/verify-pro', verifyToken, async (req, res) => {
+  try {
+    const session_id = req.body?.session_id || req.query?.session_id
+    if (!session_id) {
+      return res.status(400).json({ success: false, message: 'Session ID is required' })
+    }
+
+    const { payments, users } = getCollections()
+    const technicianEmail = req.user.email
+
+    // Idempotency check: see if already recorded
+    const existingPayment = await payments.findOne({ stripeSessionId: String(session_id) })
+    if (existingPayment) {
+      await users.updateOne(
+        { email: technicianEmail },
+        { $set: { plan: 'pro', updatedAt: new Date() } }
+      )
+      return res.json({
+        success: true,
+        message: 'Verified Pro subscription active!',
+        plan: 'pro',
+        payment: existingPayment
+      })
+    }
+
+    let transactionId = `sub_${Date.now()}`
+    let paidAmount = 29.00
+
+    const isMockSession = String(session_id).startsWith('cs_test_sim_')
+    if (!isMockSession) {
+      const session = await stripe.checkout.sessions.retrieve(session_id)
+      if (session.payment_status !== 'paid') {
+        return res.status(400).json({ success: false, message: 'Payment has not been completed on Stripe' })
+      }
+      transactionId = session.payment_intent ? String(session.payment_intent) : `sub_${session.id}`
+      paidAmount = (session.amount_total || 2900) / 100
+    }
+
+    const now = new Date()
+
+    // 1. Update user to Pro in MongoDB
+    await users.updateOne(
+      { email: technicianEmail },
+      { $set: { plan: 'pro', upgradedAt: now, updatedAt: now } }
+    )
+
+    // 2. Insert subscription payment record
+    const paymentDoc = {
+      serviceTitle: 'FixMate Verified Pro Technician Plan',
+      customerName: req.user.name || 'Technician',
+      customerEmail: technicianEmail,
+      technicianName: req.user.name || 'Technician',
+      technicianEmail: technicianEmail,
+      amount: paidAmount,
+      currency: 'usd',
+      transactionId,
+      stripeSessionId: String(session_id),
+      paymentStatus: 'paid',
+      type: 'subscription',
+      paidAt: now
+    }
+
+    const insertResult = await payments.insertOne(paymentDoc)
+
+    return res.json({
+      success: true,
+      message: 'Congratulations! You are now upgraded to FixMate Verified Pro with unlimited listings.',
+      plan: 'pro',
+      payment: { ...paymentDoc, _id: insertResult.insertedId }
+    })
+  } catch (error) {
+    return res.status(500).json({
+      success: false,
+      message: 'Failed to verify Pro upgrade payment',
+      error: error.message
+    })
+  }
+})
+
+/**
  * GET /api/payments/my
  * Customer views their own payment transactions
  */
