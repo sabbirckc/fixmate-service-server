@@ -70,7 +70,7 @@ router.post('/create-checkout-session', verifyToken, verifyCustomer, async (req,
     }
 
     const session = await stripe.checkout.sessions.create({
-      payment_method_types: ['card'],
+      customer_email: booking.customerEmail,
       line_items: [
         {
           price_data: {
@@ -78,7 +78,7 @@ router.post('/create-checkout-session', verifyToken, verifyCustomer, async (req,
             product_data: {
               name: `FixMate Repair: ${booking.serviceTitle}`,
               description: `Technician: ${booking.technicianName} | Category: ${booking.category}`,
-              images: booking.serviceImage ? [booking.serviceImage] : []
+              ...(booking.serviceImage && booking.serviceImage.startsWith('https://') ? { images: [booking.serviceImage] } : {})
             },
             unit_amount: unitAmountCents
           },
@@ -86,7 +86,7 @@ router.post('/create-checkout-session', verifyToken, verifyCustomer, async (req,
         }
       ],
       mode: 'payment',
-      success_url: `${clientUrl}/payment/success?session_id={CHECKOUT_SESSION_ID}`,
+      success_url: `${clientUrl}/payment/success?session_id={CHECKOUT_SESSION_ID}&booking_id=${booking._id.toString()}`,
       cancel_url: `${clientUrl}/payment/cancel?booking_id=${booking._id.toString()}`,
       metadata: {
         bookingId: booking._id.toString(),
@@ -233,6 +233,76 @@ router.get('/my', verifyToken, verifyCustomer, async (req, res) => {
   } catch (error) {
     return res.status(500).json({ success: false, message: 'Failed to fetch customer payments', error: error.message })
   }
+})
+
+/**
+ * POST /api/payments/webhook
+ * Stripe Webhook Handler for asynchronous fulfillment (Stripe Docs standard)
+ */
+router.post('/webhook', async (req, res) => {
+  const sig = req.headers['stripe-signature']
+  const endpointSecret = process.env.STRIPE_WEBHOOK_SECRET
+
+  let event
+  try {
+    if (endpointSecret && sig) {
+      event = stripe.webhooks.constructEvent(req.rawBody || JSON.stringify(req.body), sig, endpointSecret)
+    } else {
+      event = req.body
+    }
+  } catch (err) {
+    console.error('Webhook signature verification failed:', err.message)
+    return res.status(400).send(`Webhook Error: ${err.message}`)
+  }
+
+  // Handle the checkout.session.completed event
+  if (event.type === 'checkout.session.completed') {
+    const session = event.data.object
+    const bookingId = session.metadata?.bookingId
+
+    if (bookingId && ObjectId.isValid(bookingId)) {
+      try {
+        const { payments, bookings } = getCollections()
+        const existing = await payments.findOne({ stripeSessionId: session.id })
+
+        if (!existing) {
+          const booking = await bookings.findOne({ _id: new ObjectId(bookingId) })
+          if (booking) {
+            const now = new Date()
+            const paymentDoc = {
+              bookingId: booking._id.toString(),
+              serviceTitle: booking.serviceTitle,
+              customerName: booking.customerName,
+              customerEmail: booking.customerEmail,
+              technicianName: booking.technicianName,
+              technicianEmail: booking.technicianEmail,
+              amount: (session.amount_total || 0) / 100 || booking.finalAmount || booking.basePrice,
+              currency: session.currency || 'usd',
+              transactionId: session.payment_intent ? String(session.payment_intent) : `txn_${session.id}`,
+              stripeSessionId: session.id,
+              paymentStatus: 'paid',
+              paidAt: now,
+              source: 'webhook'
+            }
+
+            await payments.insertOne(paymentDoc)
+            await bookings.updateOne(
+              { _id: booking._id },
+              {
+                $set: { paymentStatus: 'paid', updatedAt: now },
+                $push: { statusHistory: { status: 'paid', changedAt: now, changedBy: 'stripe_webhook' } }
+              }
+            )
+            console.log(`[Stripe Webhook] Successfully recorded payment for booking ${bookingId}`)
+          }
+        }
+      } catch (dbErr) {
+        console.error('[Stripe Webhook] Error updating database:', dbErr)
+      }
+    }
+  }
+
+  return res.json({ received: true })
 })
 
 export default router
