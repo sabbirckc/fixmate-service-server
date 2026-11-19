@@ -216,10 +216,10 @@ router.get('/bookings', async (req, res) => {
 })
 
 /**
- * GET /api/admin/transactions
- * Table of every payment + total revenue calculation
+ * GET /api/admin/transactions & GET /api/admin/payments
+ * Table of every payment + total revenue calculation (Challenge 2 table: GET /api/admin/payments)
  */
-router.get('/transactions', async (req, res) => {
+async function getAdminTransactionsHandler(req, res) {
   try {
     const { payments } = getCollections()
     const allPayments = await payments
@@ -238,6 +238,9 @@ router.get('/transactions', async (req, res) => {
   } catch (error) {
     return res.status(500).json({ success: false, message: 'Failed to fetch transactions', error: error.message })
   }
-})
+}
+
+router.get('/transactions', getAdminTransactionsHandler)
+router.get('/payments', getAdminTransactionsHandler)
 
 export default router

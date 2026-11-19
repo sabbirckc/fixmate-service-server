@@ -124,8 +124,13 @@ async function handlePaymentVerification(req, res) {
 
     const { payments, bookings } = getCollections()
 
-    // 1. Check if already recorded (Idempotency check)
-    const existingPayment = await payments.findOne({ stripeSessionId: session_id })
+    // 1. Check if already recorded (Idempotency check: by sessionId or bookingId)
+    const existingPayment = await payments.findOne({
+      $or: [
+        { stripeSessionId: String(session_id) },
+        ...(booking_id && ObjectId.isValid(booking_id) ? [{ bookingId: String(booking_id) }] : [])
+      ]
+    })
     if (existingPayment) {
       return res.json({
         success: true,
@@ -355,7 +360,12 @@ router.post('/webhook', async (req, res) => {
     if (bookingId && ObjectId.isValid(bookingId)) {
       try {
         const { payments, bookings } = getCollections()
-        const existing = await payments.findOne({ stripeSessionId: session.id })
+        const existing = await payments.findOne({
+          $or: [
+            { stripeSessionId: session.id },
+            { bookingId: String(bookingId) }
+          ]
+        })
 
         if (!existing) {
           const booking = await bookings.findOne({ _id: new ObjectId(bookingId) })
