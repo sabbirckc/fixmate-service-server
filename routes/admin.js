@@ -1,6 +1,6 @@
 import { Router } from 'express'
 import { ObjectId } from 'mongodb'
-import { getCollections } from '../config/db.js'
+import { getCollections, getDb } from '../config/db.js'
 import { verifyToken, verifyAdmin } from '../middlewares/auth.js'
 
 const router = Router()
