@@ -16,7 +16,23 @@ router.post('/jwt', async (req, res) => {
     }
 
     const { users } = getCollections()
-    const user = await users.findOne({ email })
+    let user = await users.findOne({ email })
+
+    if (!user) {
+      const initialRole = role === 'technician' ? 'technician' : 'customer'
+      const newUser = {
+        email,
+        name: name || '',
+        role: initialRole,
+        phone: '',
+        area: '',
+        bio: '',
+        createdAt: new Date(),
+        updatedAt: new Date()
+      }
+      const insertResult = await users.insertOne(newUser)
+      user = { ...newUser, _id: insertResult.insertedId }
+    }
 
     const userRole = user?.role || (role === 'technician' ? 'technician' : 'customer')
     const userName = user?.name || name || ''
