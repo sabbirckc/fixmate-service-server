@@ -9,13 +9,14 @@ const router = Router()
  * PATCH /api/users/profile
  * Update profile details (Name, Phone, Area, Bio, Image)
  * Email and Role are read-only and immutable by user
+ * Cascades name and contact updates to services, bookings, and payments
  */
 router.patch('/profile', verifyToken, async (req, res) => {
   try {
     const { name, phone, area, bio, image } = req.body
     const userEmail = req.user.email
 
-    const { users } = getCollections()
+    const { users, services, bookings, payments } = getCollections()
     const db = getDb()
     const authUserCol = db.collection('user')
 
@@ -29,35 +30,87 @@ router.patch('/profile', verifyToken, async (req, res) => {
     if (bio !== undefined) updateDoc.bio = typeof bio === 'string' ? bio.trim() : bio
     if (image !== undefined) updateDoc.image = typeof image === 'string' ? image.trim() : image
 
+    const emailRegex = new RegExp(`^${userEmail.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}$`, 'i')
+
     // 1. Update or upsert in Express 'users' collection
-    await users.updateOne(
-      { email: userEmail },
-      { 
-        $set: updateDoc,
-        $setOnInsert: {
-          email: userEmail,
-          role: req.user.role || 'customer',
-          createdAt: new Date()
-        }
-      },
-      { upsert: true }
+    await users.updateMany(
+      { email: emailRegex },
+      { $set: updateDoc }
     )
 
+    const existingUser = await users.findOne({ email: emailRegex })
+    if (!existingUser) {
+      await users.insertOne({
+        ...updateDoc,
+        email: userEmail,
+        role: req.user.role || 'customer',
+        createdAt: new Date(),
+      })
+    }
+
     // 2. Also update BetterAuth 'user' collection to keep session in sync
-    await authUserCol.updateOne(
-      { email: userEmail },
+    await authUserCol.updateMany(
+      { email: emailRegex },
       { $set: updateDoc }
     ).catch(() => {})
 
-    // 3. Fetch latest combined user to return
+    // 3. Cascade updates to services collection if user is a technician
+    const serviceUpdates = { updatedAt: new Date() }
+    if (updateDoc.name) serviceUpdates.technicianName = updateDoc.name
+    if (updateDoc.image !== undefined) serviceUpdates.technicianImage = updateDoc.image
+    if (updateDoc.phone !== undefined) serviceUpdates.technicianPhone = updateDoc.phone
+
+    if (Object.keys(serviceUpdates).length > 1) {
+      await services.updateMany(
+        { technicianEmail: emailRegex },
+        { $set: serviceUpdates }
+      ).catch(() => {})
+    }
+
+    // 4. Cascade updates to bookings collection
+    if (updateDoc.name) {
+      // If user is the technician on the booking
+      await bookings.updateMany(
+        { technicianEmail: emailRegex },
+        { $set: { technicianName: updateDoc.name, updatedAt: new Date() } }
+      ).catch(() => {})
+
+      // If user is the customer on the booking
+      const custBookingUpdates = { customerName: updateDoc.name, updatedAt: new Date() }
+      if (updateDoc.phone) custBookingUpdates.customerPhone = updateDoc.phone
+      await bookings.updateMany(
+        { customerEmail: emailRegex },
+        { $set: custBookingUpdates }
+      ).catch(() => {})
+    } else if (updateDoc.phone) {
+      await bookings.updateMany(
+        { customerEmail: emailRegex },
+        { $set: { customerPhone: updateDoc.phone, updatedAt: new Date() } }
+      ).catch(() => {})
+    }
+
+    // 5. Cascade updates to payments collection
+    if (updateDoc.name) {
+      await payments.updateMany(
+        { technicianEmail: emailRegex },
+        { $set: { technicianName: updateDoc.name } }
+      ).catch(() => {})
+
+      await payments.updateMany(
+        { customerEmail: emailRegex },
+        { $set: { customerName: updateDoc.name } }
+      ).catch(() => {})
+    }
+
+    // 6. Fetch latest combined user to return
     const updatedUser = await users.findOne(
-      { email: userEmail },
+      { email: emailRegex },
       { projection: { password: 0 } }
     )
 
     return res.json({
       success: true,
-      message: 'Profile updated successfully',
+      message: 'Profile updated successfully across all platform records',
       user: updatedUser
     })
   } catch (error) {
