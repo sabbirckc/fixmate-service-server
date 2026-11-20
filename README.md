@@ -7,8 +7,8 @@ FixMate Server is the backend REST API for the FixMate on-demand repair service 
 [https://fixmate-service.vercel.app](https://fixmate-service.vercel.app)
 
 ## Admin Credentials
-- **Email:** `admin@fixmate.com`
-- **Password:** `Password123`
+- **Email:** `admin@gmail.com`
+- **Password:** `Admin12345`
 
 ## Key Features
 - **Role-Based Access Control:** Custom Express middlewares (`verifyToken`, `verifyCustomer`, `verifyTechnician`, `verifyAdmin`) enforcing role authorization and 401/403 status responses.
