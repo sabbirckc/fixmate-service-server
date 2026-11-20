@@ -112,6 +112,13 @@ router.patch('/users/:id/role', async (req, res) => {
       { $set: { role, updatedAt: new Date() } }
     )
 
+    // Simultaneously update BetterAuth 'user' collection so session immediately reflects the new role
+    const db = getDb()
+    await db.collection('user').updateOne(
+      { email: targetUser.email.toLowerCase() },
+      { $set: { role, updatedAt: new Date() } }
+    ).catch(() => {})
+
     return res.json({
       success: true,
       message: `User role successfully updated to '${role}'`,
