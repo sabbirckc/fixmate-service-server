@@ -74,10 +74,12 @@ router.get('/users', async (req, res) => {
 
     const emailMap = new Map()
     for (const u of authUsers) {
-      if (u.email) emailMap.set(u.email.toLowerCase(), u)
+      if (u && u.email && typeof u.email === 'string') {
+        emailMap.set(u.email.toLowerCase(), u)
+      }
     }
     for (const u of allUsers) {
-      if (u.email) {
+      if (u && u.email && typeof u.email === 'string') {
         const existing = emailMap.get(u.email.toLowerCase())
         emailMap.set(u.email.toLowerCase(), { ...existing, ...u })
       }
@@ -110,25 +112,28 @@ router.patch('/users/:id/role', async (req, res) => {
     const db = getDb()
 
     // Find target user by ID or by email
+    const searchEmail = (email || '').trim().toLowerCase()
+    const emailRegex = searchEmail ? new RegExp(`^${searchEmail.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}$`, 'i') : null
+
     let targetUser = null
     if (ObjectId.isValid(id)) {
       targetUser = await users.findOne({ _id: new ObjectId(id) })
     }
-    if (!targetUser && email) {
-      targetUser = await users.findOne({ email: email.toLowerCase() })
+    if (!targetUser && emailRegex) {
+      targetUser = await users.findOne({ email: emailRegex })
     }
     if (!targetUser && ObjectId.isValid(id)) {
       targetUser = await db.collection('user').findOne({ _id: new ObjectId(id) }).catch(() => null)
     }
-    if (!targetUser && email) {
-      targetUser = await db.collection('user').findOne({ email: email.toLowerCase() }).catch(() => null)
+    if (!targetUser && emailRegex) {
+      targetUser = await db.collection('user').findOne({ email: emailRegex }).catch(() => null)
     }
 
     if (!targetUser) {
       return res.status(404).json({ success: false, message: 'User not found' })
     }
 
-    const userEmail = targetUser.email.toLowerCase()
+    const userEmail = (targetUser.email || searchEmail).toLowerCase()
 
     // Rule: Admin cannot change their own role
     if (userEmail === req.user.email.toLowerCase()) {
@@ -138,22 +143,35 @@ router.patch('/users/:id/role', async (req, res) => {
       })
     }
 
-    // Update 'users' collection
+    const targetRegex = new RegExp(`^${userEmail.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}$`, 'i')
+
+    // Update 'users' collection by ID and by email
     if (ObjectId.isValid(id)) {
       await users.updateOne(
         { _id: new ObjectId(id) },
         { $set: { role, updatedAt: new Date() } }
-      )
+      ).catch(() => {})
     }
-    await users.updateOne(
-      { email: userEmail },
-      { $set: { role, updatedAt: new Date() } },
-      { upsert: true }
+    await users.updateMany(
+      { email: targetRegex },
+      { $set: { role, updatedAt: new Date() } }
     )
 
+    // Ensure at least one record exists in 'users'
+    const existingInUsers = await users.findOne({ email: targetRegex })
+    if (!existingInUsers) {
+      await users.insertOne({
+        email: userEmail,
+        name: targetUser.name || 'FixMate User',
+        role,
+        createdAt: new Date(),
+        updatedAt: new Date()
+      })
+    }
+
     // Simultaneously update BetterAuth 'user' collection
-    await db.collection('user').updateOne(
-      { email: userEmail },
+    await db.collection('user').updateMany(
+      { email: targetRegex },
       { $set: { role, updatedAt: new Date() } }
     ).catch(() => {})
 
