@@ -56,17 +56,35 @@ router.get('/overview', async (req, res) => {
 
 /**
  * GET /api/admin/users
- * Table of all users
+ * Table of all users (merges both users and user collections)
  */
 router.get('/users', async (req, res) => {
   try {
     const { users } = getCollections()
+    const db = getDb()
     const allUsers = await users
       .find({}, { projection: { password: 0 } })
       .sort({ createdAt: -1 })
       .toArray()
 
-    return res.json({ success: true, users: allUsers })
+    const authUsers = await db.collection('user')
+      .find({}, { projection: { password: 0 } })
+      .toArray()
+      .catch(() => [])
+
+    const emailMap = new Map()
+    for (const u of authUsers) {
+      if (u.email) emailMap.set(u.email.toLowerCase(), u)
+    }
+    for (const u of allUsers) {
+      if (u.email) {
+        const existing = emailMap.get(u.email.toLowerCase())
+        emailMap.set(u.email.toLowerCase(), { ...existing, ...u })
+      }
+    }
+
+    const mergedUsers = Array.from(emailMap.values())
+    return res.json({ success: true, users: mergedUsers })
   } catch (error) {
     return res.status(500).json({ success: false, message: 'Failed to fetch users', error: error.message })
   }
@@ -79,7 +97,7 @@ router.get('/users', async (req, res) => {
 router.patch('/users/:id/role', async (req, res) => {
   try {
     const { id } = req.params
-    const { role } = req.body
+    const { role, email } = req.body
 
     if (!['customer', 'technician', 'admin'].includes(role)) {
       return res.status(400).json({
@@ -88,34 +106,54 @@ router.patch('/users/:id/role', async (req, res) => {
       })
     }
 
-    if (!ObjectId.isValid(id)) {
-      return res.status(400).json({ success: false, message: 'Invalid user ID format' })
-    }
-
     const { users } = getCollections()
-    const targetUser = await users.findOne({ _id: new ObjectId(id) })
+    const db = getDb()
+
+    // Find target user by ID or by email
+    let targetUser = null
+    if (ObjectId.isValid(id)) {
+      targetUser = await users.findOne({ _id: new ObjectId(id) })
+    }
+    if (!targetUser && email) {
+      targetUser = await users.findOne({ email: email.toLowerCase() })
+    }
+    if (!targetUser && ObjectId.isValid(id)) {
+      targetUser = await db.collection('user').findOne({ _id: new ObjectId(id) }).catch(() => null)
+    }
+    if (!targetUser && email) {
+      targetUser = await db.collection('user').findOne({ email: email.toLowerCase() }).catch(() => null)
+    }
 
     if (!targetUser) {
       return res.status(404).json({ success: false, message: 'User not found' })
     }
 
+    const userEmail = targetUser.email.toLowerCase()
+
     // Rule: Admin cannot change their own role
-    if (targetUser.email === req.user.email) {
+    if (userEmail === req.user.email.toLowerCase()) {
       return res.status(400).json({
         success: false,
         message: 'Forbidden: Administrators cannot modify their own role.'
       })
     }
 
+    // Update 'users' collection
+    if (ObjectId.isValid(id)) {
+      await users.updateOne(
+        { _id: new ObjectId(id) },
+        { $set: { role, updatedAt: new Date() } }
+      )
+    }
     await users.updateOne(
-      { _id: new ObjectId(id) },
-      { $set: { role, updatedAt: new Date() } }
+      { email: userEmail },
+      { $set: { role, updatedAt: new Date() } },
+      { upsert: true }
     )
 
-    // Simultaneously update BetterAuth 'user' collection so session immediately reflects the new role
-    const db = getDb()
+    // Simultaneously update BetterAuth 'user' collection
     await db.collection('user').updateOne(
-      { email: targetUser.email.toLowerCase() },
+      { email: userEmail },
       { $set: { role, updatedAt: new Date() } }
     ).catch(() => {})
 
